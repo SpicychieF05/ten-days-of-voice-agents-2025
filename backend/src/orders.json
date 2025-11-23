@@ -1,0 +1,12 @@
+[
+  {
+    "drinkType": "latte",
+    "size": "medium",
+    "milk": "oat milk",
+    "extras": [
+      "vanilla syrup"
+    ],
+    "name": "T Rantan",
+    "timestamp": "2025-11-23T22:03:20.006331"
+  }
+]
