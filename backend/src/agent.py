@@ -29,234 +29,179 @@ load_dotenv(".env.local")
 
 
 @dataclass
-class OrderState:
-    """Represents a coffee order state for Falcon Brew Coffee."""
-    drinkType: Optional[str] = None
-    size: Optional[str] = None
-    milk: Optional[str] = None
-    extras: List[str] = field(default_factory=list)
-    name: Optional[str] = None
-    
+class WellnessState:
+    """Represents a short daily wellness check-in state."""
+    mood: Optional[str] = None
+    energy: Optional[str] = None
+    stress: Optional[str] = None
+    goals: List[str] = field(default_factory=list)
+
     def is_complete(self) -> bool:
-        """Check if all required fields are filled (extras are optional)."""
-        return all([
-            self.drinkType is not None,
-            self.size is not None,
-            self.milk is not None,
-            self.name is not None
-        ])
-    
+        """Return True when required fields (mood, energy, goals) exist."""
+        return bool(self.mood and self.energy and self.goals)
+
     def missing_fields(self) -> List[str]:
-        """Return list of missing required fields."""
+        """Return a list of missing required fields."""
         missing = []
-        if self.drinkType is None:
-            missing.append("drink type")
-        if self.size is None:
-            missing.append("size")
-        if self.milk is None:
-            missing.append("milk preference")
-        if self.name is None:
-            missing.append("customer name")
+        if not self.mood:
+            missing.append("mood")
+        if not self.energy:
+            missing.append("energy")
+        if not self.goals:
+            missing.append("goals")
         return missing
-    
+
     def to_dict(self) -> dict:
-        """Convert to dictionary for JSON serialization."""
         return asdict(self)
 
 
 class Assistant(Agent):
     def __init__(self) -> None:
-        # Initialize order state
-        self.order_state = OrderState()
-        
-        # Set up orders file path
-        self.orders_file = os.path.join(
-            os.path.dirname(__file__), 
-            "orders.json"
+        # Initialize wellness state
+        self.wellness_state = WellnessState()
+
+        # Set up wellness log file path
+        self.wellness_file = os.path.join(
+            os.path.dirname(__file__),
+            "wellness_log.json",
         )
-        
-        # Initialize the agent with barista persona and tools
+
+        # Load past entries so we can softly reference them in the persona
+        self.past_entries: List[dict] = self._load_past_entries()
+        last_ref = "No previous check-ins found." if not self.past_entries else (
+            f"Last check-in on {self.past_entries[-1].get('timestamp', 'unknown date')}: mood '{self.past_entries[-1].get('mood','')}', energy '{self.past_entries[-1].get('energy','')}'."
+        )
+
+        # Persona instructions for a supportive wellness companion
+        instructions = f"""You are a warm, calm, and encouraging daily wellness companion. You are NOT a clinician and must not provide medical advice or diagnoses.
+
+When you begin a session:
+- Greet the user in a gentle, human tone.
+- Softly reference past check-ins when available (one short sentence). Example: '{last_ref}'
+- Conduct a short daily check-in by asking one question at a time:
+  1) How are you feeling today? (mood — free text or simple scale)
+  2) What's your energy like right now? (low/medium/high or brief text)
+  3) Any stress or things on your mind you'd like to note? (optional)
+  4) What are 1–3 practical goals you want to accomplish today? (comma-separated or listed)
+
+After collecting responses, offer a small, grounded, non-medical reflection focused on simple actions (e.g., small steps, breathing, breaking tasks down). Keep language simple and encouraging.
+
+Close the session by summarizing the mood, energy, and goals, ask for confirmation to save, and then save the check-in to a JSON file when requested.
+
+Rules:
+- Do not offer medical diagnoses or definitive medical advice.
+- Avoid clinical language; be supportive and practical.
+- Keep responses concise and friendly.
+"""
+
         super().__init__(
-            instructions="""You are a friendly and professional barista at Falcon Brew Coffee, a premium coffee shop known for exceptional service and quality beverages.
-
-Your role:
-- Greet customers warmly when they arrive
-- Help them place their coffee order by asking clarifying questions one at a time
-- Be patient, polite, and conversational like a real barista
-- Use the provided tools to record order details AS SOON AS the customer mentions them
-- Keep responses natural and concise, without emojis, asterisks, or complex formatting
-
-Order collection process:
-1. When a customer mentions a drink, immediately use set_drink_type tool
-2. After drink is set, ask about size and use set_size tool when mentioned
-3. After size is set, ask about milk and use set_milk tool when mentioned
-4. After milk is set, ask about extras and use set_extras tool if mentioned
-5. After extras (or if none), ask for name and use set_customer_name tool
-6. Once all details are collected, use save_order to finalize the order
-
-Required information:
-- Drink type (latte, cappuccino, espresso, americano, mocha, flat white, etc.)
-- Size (small, medium, large)
-- Milk preference (whole milk, oat milk, almond milk, soy milk, skim milk, no milk)
-- Customer name
-- Optional extras (vanilla syrup, caramel, whipped cream, extra shot, chocolate drizzle, etc.)
-
-Always be helpful and make customers feel welcome at Falcon Brew Coffee!""",
+            instructions=instructions,
             tools=self._build_tools(),
         )
+
+    def _load_past_entries(self) -> List[dict]:
+        """Load past wellness entries from the JSON file if available."""
+        if os.path.exists(self.wellness_file):
+            try:
+                with open(self.wellness_file, 'r') as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        return data
+            except Exception:
+                logger.exception("Failed to read wellness log; starting fresh")
+        return []
     
     def _build_tools(self):
-        """Build and return the list of function tools for the barista."""
-        
-        @function_tool
-        async def set_drink_type(context: RunContext, drink: str):
-            """Record the type of drink the customer wants to order.
-            
-            Use this tool immediately when the customer mentions what drink they want.
-            
-            Args:
-                drink: The type of drink (e.g., latte, cappuccino, espresso, americano, mocha, flat white, macchiato)
-            """
-            logger.info(f"Setting drink type: {drink}")
-            self.order_state.drinkType = drink.strip().lower()
-            return f"Got it, one {drink}. What size would you like?"
-        
-        @function_tool
-        async def set_size(context: RunContext, size: str):
-            """Record the size of the drink.
-            
-            Use this tool immediately when the customer mentions the size.
-            
-            Args:
-                size: The size of the drink (small, medium, large, or short, tall, grande, venti)
-            """
-            logger.info(f"Setting size: {size}")
-            # Normalize size variations
-            size_normalized = size.strip().lower()
-            if size_normalized in ["short", "tall", "small"]:
-                size_normalized = "small"
-            elif size_normalized in ["grande", "medium"]:
-                size_normalized = "medium"
-            elif size_normalized in ["venti", "large"]:
-                size_normalized = "large"
-            
-            self.order_state.size = size_normalized
-            return f"Perfect, {size_normalized} it is. What kind of milk would you like?"
-        
-        @function_tool
-        async def set_milk(context: RunContext, milk_type: str):
-            """Record the customer's milk preference.
-            
-            Use this tool immediately when the customer mentions their milk preference.
-            
-            Args:
-                milk_type: The type of milk (whole milk, oat milk, almond milk, soy milk, skim milk, 2%, no milk)
-            """
-            logger.info(f"Setting milk type: {milk_type}")
-            self.order_state.milk = milk_type.strip().lower()
-            return f"Great choice, {milk_type}. Would you like any extras like vanilla syrup, caramel, whipped cream, or an extra shot?"
-        
-        @function_tool
-        async def set_extras(context: RunContext, extras: str):
-            """Record any extras or additions to the drink.
-            
-            Use this tool when the customer mentions extras, add-ons, or special requests.
-            Can be called multiple times for different extras.
-            
-            Args:
-                extras: The extras to add (e.g., vanilla syrup, caramel, whipped cream, extra shot, chocolate drizzle)
-            """
-            logger.info(f"Adding extras: {extras}")
-            # Parse comma-separated extras or single extra
-            extra_items = [e.strip().lower() for e in extras.split(",")]
-            self.order_state.extras.extend(extra_items)
-            
-            if self.order_state.name:
-                return f"Added {extras} to your order. Let me finalize that for you."
-            else:
-                return f"Added {extras}. May I have your name for the order?"
-        
-        @function_tool
-        async def set_customer_name(context: RunContext, name: str):
-            """Record the customer's name for the order.
-            
-            Use this tool when the customer provides their name.
-            
-            Args:
-                name: The customer's name
-            """
-            logger.info(f"Setting customer name: {name}")
-            self.order_state.name = name.strip()
-            
-            # Check if order is complete
-            if self.order_state.is_complete():
-                return f"Thank you {name}. Let me confirm your order and get that started for you."
-            else:
-                missing = self.order_state.missing_fields()
-                return f"Thank you {name}. I still need to know your {missing[0]}."
-        
-        @function_tool
-        async def save_order(context: RunContext):
-            """Save the completed order to the orders file.
-            
-            Use this tool ONLY when all required order information has been collected:
-            - drink type
-            - size
-            - milk preference
-            - customer name
-            
-            This will write the order to orders.json and reset the order state.
-            """
-            logger.info("Attempting to save order")
-            
-            # Check if order is complete
-            if not self.order_state.is_complete():
-                missing = self.order_state.missing_fields()
-                return f"I cannot save the order yet. I still need: {', '.join(missing)}"
-            
-            # Add timestamp
-            order_dict = self.order_state.to_dict()
-            order_dict["timestamp"] = datetime.now().isoformat()
-            
-            # Read existing orders or create new list
-            orders = []
-            if os.path.exists(self.orders_file):
-                try:
-                    with open(self.orders_file, 'r') as f:
-                        orders = json.load(f)
-                except (json.JSONDecodeError, FileNotFoundError):
-                    orders = []
-            
-            # Append new order
-            orders.append(order_dict)
-            
-            # Write to file
-            with open(self.orders_file, 'w') as f:
-                json.dump(orders, f, indent=2)
-            
-            logger.info(f"Order saved successfully: {order_dict}")
-            
-            # Create summary
-            extras_str = ", ".join(self.order_state.extras) if self.order_state.extras else "none"
-            summary = f"""Order confirmed for {self.order_state.name}:
-- {self.order_state.size} {self.order_state.drinkType}
-- {self.order_state.milk}
-- Extras: {extras_str}
+        """Build and return wellness check-in function tools."""
 
-Your order will be ready shortly. Thank you for choosing Falcon Brew Coffee!"""
-            
-            # Reset order state for next customer
-            self.order_state = OrderState()
-            
-            return summary
-        
+        @function_tool
+        async def set_mood(context: RunContext, mood: str):
+            """Set the user's mood (free text or simple scale)."""
+            logger.info(f"Setting mood: {mood}")
+            self.wellness_state.mood = mood.strip()
+            return "Thanks — noted your mood. How's your energy right now?"
+
+        @function_tool
+        async def set_energy(context: RunContext, energy: str):
+            """Set the user's energy level (low/medium/high or free text)."""
+            logger.info(f"Setting energy: {energy}")
+            self.wellness_state.energy = energy.strip()
+            return "Got it. Would you like to note any stress or things on your mind? (optional)"
+
+        @function_tool
+        async def set_stress(context: RunContext, stress: str):
+            """Set optional stress/context notes."""
+            logger.info(f"Setting stress: {stress}")
+            self.wellness_state.stress = stress.strip()
+            return "Thanks for sharing that. What are 1–3 practical goals for today?"
+
+        @function_tool
+        async def set_goals(context: RunContext, goals: str):
+            """Set 1–3 goals (comma-separated or single-line)."""
+            logger.info(f"Setting goals: {goals}")
+            items = [g.strip() for g in goals.split(",") if g.strip()]
+            # Limit to 3 goals
+            self.wellness_state.goals = items[:3]
+            return f"Great — I have {len(self.wellness_state.goals)} goal(s). Would you like a short reflection before we save?"
+
+        @function_tool
+        async def save_checkin(context: RunContext):
+            """Validate, save the check-in to JSON, and return a recap string."""
+            logger.info("Attempting to save check-in")
+
+            if not self.wellness_state.is_complete():
+                missing = self.wellness_state.missing_fields()
+                return f"I can't save yet. Missing: {', '.join(missing)}"
+
+            entry = self.wellness_state.to_dict()
+            entry["timestamp"] = datetime.now().isoformat()
+
+            # Create a brief assistant summary/reflection (non-medical, actionable)
+            mood = entry.get("mood", "").strip()
+            energy = entry.get("energy", "").strip()
+            goals = entry.get("goals", [])
+            goals_str = ", ".join(goals)
+            reflection = (
+                f"You said you're feeling '{mood}' with energy '{energy}'. "
+                f"Today you plan: {goals_str}. A small suggestion: pick one goal to start with, set a 10–20 minute window, and take a short break after finishing."
+            )
+            entry["assistant_summary"] = reflection
+
+            # Read existing log
+            records = []
+            if os.path.exists(self.wellness_file):
+                try:
+                    with open(self.wellness_file, 'r') as f:
+                        records = json.load(f)
+                except (json.JSONDecodeError, FileNotFoundError):
+                    records = []
+
+            records.append(entry)
+
+            # Write back to file (ensure folder exists)
+            try:
+                with open(self.wellness_file, 'w') as f:
+                    json.dump(records, f, indent=2)
+            except Exception as e:
+                logger.exception("Failed to write wellness log")
+                return "I tried to save your check-in but something went wrong. Please try again later."
+
+            # Reset in-memory state
+            self.wellness_state = WellnessState()
+
+            logger.info(f"Check-in saved: {entry}")
+
+            recap = (
+                f"Check-in saved. {reflection} I'll keep this on file and we can reference past entries next time."
+            )
+            return recap
+
         return [
-            set_drink_type,
-            set_size,
-            set_milk,
-            set_extras,
-            set_customer_name,
-            save_order,
+            set_mood,
+            set_energy,
+            set_stress,
+            set_goals,
+            save_checkin,
         ]
 
 
@@ -353,5 +298,5 @@ if __name__ == "__main__":
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint, 
         prewarm_fnc=prewarm,
-        agent_name="coffee-barista"
+        agent_name="wellness-companion-day3"
     ))
