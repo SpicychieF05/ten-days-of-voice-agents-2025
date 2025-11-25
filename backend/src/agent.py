@@ -1,7 +1,7 @@
 import logging
 import json
 import os
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -15,7 +15,8 @@ from livekit.agents import (
     tokenize,
     function_tool,
     RunContext,
-    RoomInputOptions
+    RoomInputOptions,
+    FunctionTool
 )
 from livekit.plugins import murf, silero, google, deepgram, noise_cancellation
 
@@ -30,7 +31,7 @@ VOICE_TEACH_BACK = "en-US-ken"
 
 class Assistant(Agent):
     def __init__(self, session: AgentSession) -> None:
-        self.session = session
+        self._session = session
         self.content_file = os.path.join(
             os.path.dirname(__file__),
             "shared-data",
@@ -41,6 +42,7 @@ class Assistant(Agent):
         # Initial State
         self.current_mode = "learn"
         self.current_concept_id = "variables"
+        self.current_voice = VOICE_LEARN
 
         # Build initial instructions
         instructions = self._build_instructions()
@@ -92,17 +94,24 @@ Rules:
         """Update the TTS voice based on the current mode."""
         if self.current_mode == "learn":
             # Matthew
-            self.session.tts.voice = VOICE_LEARN
+            self.current_voice = VOICE_LEARN
         elif self.current_mode == "quiz":
             # Alicia
-            self.session.tts.voice = VOICE_QUIZ
+            self.current_voice = VOICE_QUIZ
         elif self.current_mode == "teach_back":
             # Ken
-            self.session.tts.voice = VOICE_TEACH_BACK
+            self.current_voice = VOICE_TEACH_BACK
         
-        logger.info(f"Updated voice to {self.session.tts.voice} for mode {self.current_mode}")
+        # Update the session TTS if available
+        if hasattr(self._session, 'tts') and self._session.tts is not None:
+            try:
+                self._session.tts.voice = self.current_voice  # type: ignore
+            except AttributeError:
+                pass  # Voice may not be settable on this TTS instance
+        
+        logger.info(f"Updated voice to {self.current_voice} for mode {self.current_mode}")
 
-    def _build_tools(self):
+    def _build_tools(self) -> list:
         @function_tool
         async def set_learning_mode(context: RunContext, mode: str):
             """Switch the learning mode. Valid modes: 'learn', 'quiz', 'teach_back'."""
@@ -115,7 +124,7 @@ Rules:
             
             # Note: We don't strictly need to update self.instructions dynamically for the LLM to know,
             # as long as the tool output confirms the switch, the LLM context will have it.
-            return f"Switched to {mode} mode. Voice updated to {self.session.tts.voice}."
+            return f"Switched to {mode} mode. Voice updated to {self.current_voice}."
 
         @function_tool
         async def set_concept(context: RunContext, concept_id: str):
@@ -183,7 +192,7 @@ async def entrypoint(ctx: JobContext):
         agent=assistant,
         room=ctx.room,
         room_input_options=RoomInputOptions(
-            noise_cancellation=noise_cancellation.BVC(),
+            noise_cancellation=noise_cancellation.BVC(),  # type: ignore
         ),
     )
 
