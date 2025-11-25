@@ -18,7 +18,7 @@ from livekit.agents import (
     RoomInputOptions,
     FunctionTool
 )
-from livekit.plugins import murf, silero, google, deepgram, noise_cancellation
+from livekit.plugins import murf, silero, openai, deepgram, noise_cancellation
 
 logger = logging.getLogger("agent")
 
@@ -51,6 +51,8 @@ class Assistant(Agent):
             instructions=instructions,
             tools=self._build_tools(),
         )
+        
+        logger.info(f"Assistant initialized with mode: {self.current_mode}, concept: {self.current_concept_id}")
         
         # Set initial voice
         self._update_voice()
@@ -161,6 +163,8 @@ def prewarm(proc: JobProcess):
 
 
 async def entrypoint(ctx: JobContext):
+    logger.info(f"Entrypoint called for room: {ctx.room.name}")
+    
     # Logging setup
     ctx.log_context_fields = {
         "room": ctx.room.name,
@@ -173,7 +177,7 @@ async def entrypoint(ctx: JobContext):
     # Initialize Session
     session = AgentSession(
         stt=deepgram.STT(model="nova-3"),
-        llm=google.LLM(model="gemini-2.5-flash"),
+        llm=openai.LLM(model="gpt-4o-mini"),
         tts=murf.TTS(
             voice=VOICE_LEARN, # Default to Learn mode voice
             style="Conversation",
