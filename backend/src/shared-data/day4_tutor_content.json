@@ -1,0 +1,122 @@
+[
+  {
+    "id": "variables",
+    "title": "Variables",
+    "summary": "Variables store values in memory so you can reuse or modify them later. They act as named containers for data.",
+    "sample_question": "What is a variable and why do we use it?"
+  },
+  {
+    "id": "data_types",
+    "title": "Data Types",
+    "summary": "Data types classify the kind of data a variable can hold, such as integers, floats, strings, and booleans.",
+    "sample_question": "What are some common data types and what do they represent?"
+  },
+  {
+    "id": "operators",
+    "title": "Operators",
+    "summary": "Operators allow you to perform operations like arithmetic, comparison, and logical evaluations.",
+    "sample_question": "What is the difference between comparison and logical operators?"
+  },
+  {
+    "id": "conditional_statements",
+    "title": "Conditional Statements",
+    "summary": "Conditionals like if-else allow decisions in programs by running code only when certain conditions are true.",
+    "sample_question": "Why do we use if-else statements in programming?"
+  },
+  {
+    "id": "loops",
+    "title": "Loops",
+    "summary": "Loops allow repeated execution of code blocks until a condition is met, commonly using for or while loops.",
+    "sample_question": "Explain the difference between a for loop and a while loop."
+  },
+  {
+    "id": "functions",
+    "title": "Functions",
+    "summary": "Functions group reusable code into named blocks, helping reduce repetition and improve organization.",
+    "sample_question": "How do functions help make code more maintainable?"
+  },
+  {
+    "id": "parameters",
+    "title": "Parameters & Arguments",
+    "summary": "Parameters allow functions to accept input values so they can work dynamically on different data.",
+    "sample_question": "What is the difference between a parameter and an argument?"
+  },
+  {
+    "id": "lists_arrays",
+    "title": "Lists / Arrays",
+    "summary": "Lists or arrays store multiple values in a single collection, accessible by their index.",
+    "sample_question": "What is an array and how do you access its elements?"
+  },
+  {
+    "id": "strings",
+    "title": "Strings",
+    "summary": "Strings represent text and support operations like slicing, searching, and manipulation.",
+    "sample_question": "How do you extract a substring from a string?"
+  },
+  {
+    "id": "dictionaries_maps",
+    "title": "Dictionaries / Maps",
+    "summary": "Dictionaries store key-value pairs, allowing fast lookups using keys instead of indices.",
+    "sample_question": "What are key-value pairs and why are they useful?"
+  },
+  {
+    "id": "oop_basics",
+    "title": "Object-Oriented Programming",
+    "summary": "OOP organizes code using classes and objects, emphasizing reuse through concepts like inheritance and encapsulation.",
+    "sample_question": "What is an object in OOP?"
+  },
+  {
+    "id": "classes",
+    "title": "Classes",
+    "summary": "A class defines a blueprint for creating objects, including attributes and behaviors.",
+    "sample_question": "How is a class different from an object?"
+  },
+  {
+    "id": "inheritance",
+    "title": "Inheritance",
+    "summary": "Inheritance allows a class to derive properties and methods from another class, promoting reuse.",
+    "sample_question": "What is inheritance and why do we use it?"
+  },
+  {
+    "id": "encapsulation",
+    "title": "Encapsulation",
+    "summary": "Encapsulation restricts direct access to internal object data, promoting security and modularity.",
+    "sample_question": "Why is encapsulation considered an important OOP principle?"
+  },
+  {
+    "id": "polymorphism",
+    "title": "Polymorphism",
+    "summary": "Polymorphism allows a single interface to represent different underlying forms, enabling flexible and dynamic behavior.",
+    "sample_question": "Give an example of polymorphism in programming."
+  },
+  {
+    "id": "recursion",
+    "title": "Recursion",
+    "summary": "Recursion involves a function calling itself to solve smaller subproblems until a base case is reached.",
+    "sample_question": "What is a base case in recursion?"
+  },
+  {
+    "id": "error_handling",
+    "title": "Error Handling",
+    "summary": "Error handling allows programs to respond gracefully to unexpected issues using constructs like try-except.",
+    "sample_question": "Why is error handling important?"
+  },
+  {
+    "id": "file_handling",
+    "title": "File Handling",
+    "summary": "File handling allows reading from and writing to files, enabling persistent data storage.",
+    "sample_question": "What are the common modes used for opening files?"
+  },
+  {
+    "id": "api_basics",
+    "title": "APIs",
+    "summary": "APIs allow different software systems to communicate using structured requests and responses.",
+    "sample_question": "What is an API and why do developers use it?"
+  },
+  {
+    "id": "debugging",
+    "title": "Debugging",
+    "summary": "Debugging is the process of identifying and fixing errors in code using breakpoints, logs, and tools.",
+    "sample_question": "What is the purpose of debugging?"
+  }
+]
