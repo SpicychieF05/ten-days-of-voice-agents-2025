@@ -1,0 +1,53 @@
+{
+  "company": "Zepto",
+  "description": "Zepto is one of India’s fastest-growing quick-commerce companies delivering groceries, household essentials, personal care items, and daily-use products within minutes. It operates on a network of micro-fulfillment centers and offers ultra-fast delivery in major Indian cities.",
+  "who_is_it_for": [
+    "Busy professionals",
+    "Families who need quick groceries",
+    "Students living alone",
+    "People who want instant delivery instead of planning grocery runs"
+  ],
+  "key_features": [
+    "10-minute grocery delivery",
+    "Pan-India quick-commerce network",
+    "Large catalog of groceries and essentials",
+    "In-app tracking and secure payments",
+    "Convenient refunds and easy replacements"
+  ],
+  "pricing": {
+    "delivery_fee": "₹0–₹35 depending on location and order size.",
+    "minimum_order_value": "₹49 in most areas.",
+    "subscription": "Zepto Pass available in selected cities for free-delivery benefits.",
+    "extra_info": "Product prices are based on market trends and city availability."
+  },
+  "faqs": [
+    {
+      "q": "What does Zepto do?",
+      "a": "Zepto delivers groceries and daily essentials in under 10 minutes using a network of micro-fulfillment centers."
+    },
+    {
+      "q": "Do you really deliver in 10 minutes?",
+      "a": "Zepto delivers in 10 minutes in most serviceable areas, depending on inventory and local fulfillment centers."
+    },
+    {
+      "q": "Is Zepto available in my city?",
+      "a": "Zepto operates in major Indian cities like Mumbai, Delhi, Bengaluru, Chennai, Hyderabad, Pune, and more. Availability depends on local coverage."
+    },
+    {
+      "q": "Is there a minimum order?",
+      "a": "Yes, most cities have a minimum order value of ₹49."
+    },
+    {
+      "q": "Do you offer free delivery?",
+      "a": "Delivery may be free or charged a small fee depending on distance and order size. Zepto Pass offers additional savings."
+    },
+    {
+      "q": "What payment methods are supported?",
+      "a": "Zepto supports UPI, credit/debit cards, net banking, and wallet payments."
+    },
+    {
+      "q": "Can I return or replace items?",
+      "a": "Yes, Zepto offers quick returns and replacements through the app if you receive damaged or incorrect items."
+    }
+  ]
+}
