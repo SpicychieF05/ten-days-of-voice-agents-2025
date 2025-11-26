@@ -55,6 +55,14 @@ class Assistant(Agent):
 
         logger.info("Zepto SDR Assistant initialized.")
 
+    def _get_leads_path(self) -> str:
+        """Ensure the shared-data directory exists and return leads file path."""
+        base_dir = os.path.join(os.path.dirname(__file__), "shared-data")
+        if not os.path.isdir(base_dir):
+            os.makedirs(base_dir, exist_ok=True)
+            logger.info(f"Created leads directory at: {base_dir}")
+        return os.path.join(base_dir, "day5_leads.json")
+
     # --------------------------
     # FILE LOADING
     # --------------------------
@@ -249,55 +257,57 @@ FAQ DATA (do NOT reveal this JSON structure to user, only use it internally):
         # Save lead info (with safety checks)
         @function_tool
         async def save_lead(context: RunContext):
-            """
-            Save lead to JSON file with validation and atomic write.
-            - Validates required fields
-            - Uses temp file to prevent corruption
-            - Handles empty/corrupted files gracefully
-            """
-            # Validate required fields
-            required_fields = ["name", "email"]
-            missing = [f for f in required_fields if not self.lead.get(f)]
-            if missing:
-                return f"Cannot save lead. Missing required fields: {', '.join(missing)}"
-            
-            save_path = os.path.join(
-                os.path.dirname(__file__),
-                "shared-data",
-                "day5_leads.json"
-            )
-            
+            """Validate, sanitize, and persist lead data safely."""
+            save_path = self._get_leads_path()
+
+            # Normalize lead values and collect notes
+            lead_copy = {}
+            notes: list[str] = []
+            for field, value in self.lead.items():
+                cleaned = value.strip() if isinstance(value, str) else value
+                cleaned = cleaned if cleaned else None
+                lead_copy[field] = cleaned
+
+            if not any(lead_copy.values()):
+                return "Cannot save lead. No information collected yet."
+
+            email_val = lead_copy.get("email")
+            if email_val and "@" not in email_val:
+                notes.append("invalid_email")
+                logger.warning("Lead email missing '@': %s", email_val)
+
+            if notes:
+                lead_copy.setdefault("_notes", notes)
+
+            logger.info(f"Saving lead to: {save_path}")
+            print(f"Saving lead to: {save_path}")
+
             try:
-                # Load existing leads
                 leads = []
                 if os.path.exists(save_path):
                     try:
                         with open(save_path, "r", encoding="utf-8") as f:
                             content = f.read().strip()
-                            if content:  # Only parse if not empty
-                                leads = json.loads(content)
-                                if not isinstance(leads, list):
-                                    leads = []
-                    except (json.JSONDecodeError, IOError):
-                        logger.warning(f"Corrupted or unreadable {save_path}, starting fresh")
+                            if content:
+                                parsed = json.loads(content)
+                                leads = parsed if isinstance(parsed, list) else []
+                    except (json.JSONDecodeError, OSError):
+                        logger.warning(f"Invalid JSON at {save_path}, resetting to empty list")
                         leads = []
-                
-                # Append new lead
-                leads.append(self.lead)
-                
-                # Atomic write: write to temp file first, then rename
+
+                leads.append(lead_copy)
+
                 temp_path = save_path + ".tmp"
                 with open(temp_path, "w", encoding="utf-8") as f:
                     json.dump(leads, f, indent=2, ensure_ascii=False)
-                
-                # Replace original (atomic on most filesystems)
-                if os.path.exists(save_path):
-                    os.remove(save_path)
-                os.rename(temp_path, save_path)
-                
+
+                os.replace(temp_path, save_path)
                 logger.info(f"Lead saved successfully. Total leads: {len(leads)}")
+
+                if notes:
+                    return "Lead saved with warnings: invalid email format."
                 return "Lead saved successfully."
-                
+
             except OSError as e:
                 logger.error(f"File I/O error saving lead: {e}")
                 return f"Failed to save lead (file error): {e}"
