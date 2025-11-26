@@ -1,7 +1,7 @@
 import logging
 import json
 import os
-from typing import List, Optional, Sequence
+from typing import Optional
 
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -11,12 +11,10 @@ from livekit.agents import (
     JobProcess,
     WorkerOptions,
     cli,
-    metrics,
     tokenize,
     function_tool,
     RunContext,
     RoomInputOptions,
-    FunctionTool
 )
 from livekit.plugins import murf, silero, openai, deepgram, noise_cancellation
 
@@ -24,139 +22,307 @@ logger = logging.getLogger("agent")
 
 load_dotenv(".env.local")
 
-# Voice Constants
-VOICE_LEARN = "en-US-matthew"
-VOICE_QUIZ = "en-US-alicia"
-VOICE_TEACH_BACK = "en-US-ken"
+# Nikhil Voice (Murf Falcon)
+VOICE_ID = "Nikhil"
+VOICE_STYLE = "Conversational"
+VOICE_MODEL = "Falcon"
+
 
 class Assistant(Agent):
     def __init__(self, session: AgentSession) -> None:
         self._session = session
-        self.content_file = os.path.join(
-            os.path.dirname(__file__),
-            "shared-data",
-            "day4_tutor_content.json",
-        )
-        self.content = self._load_content()
-        
-        # Initial State
-        self.current_mode = "learn"
-        self.current_concept_id = "variables"
-        self.current_voice = VOICE_LEARN
 
-        # Build initial instructions
+        # Load Zepto FAQ data
+        self.faq_data = self._load_faq()
+
+        # Lead capture state (dict with string or None values)
+        self.lead: dict = {
+            "name": None,
+            "company": None,
+            "email": None,
+            "role": None,
+            "use_case": None,
+            "team_size": None,
+            "timeline": None,
+        }
+
         instructions = self._build_instructions()
 
         super().__init__(
             instructions=instructions,
             tools=self._build_tools(),
         )
-        
-        logger.info(f"Assistant initialized with mode: {self.current_mode}, concept: {self.current_concept_id}")
-        
-        # Set initial voice
-        self._update_voice()
 
-    def _load_content(self) -> List[dict]:
-        """Load content from the JSON file."""
-        if os.path.exists(self.content_file):
-            try:
-                with open(self.content_file, 'r') as f:
-                    return json.load(f)
-            except Exception:
-                logger.exception("Failed to read content file")
-        return []
+        logger.info("Zepto SDR Assistant initialized.")
+
+    # --------------------------
+    # FILE LOADING
+    # --------------------------
+
+    def _load_faq(self):
+        faq_path = os.path.join(
+            os.path.dirname(__file__),
+            "shared-data",
+            "day5_faq.json"
+        )
+        if os.path.exists(faq_path):
+            with open(faq_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return {}
+
+    # --------------------------
+    # FAQ SEARCH (OPTIMIZED)
+    # --------------------------
+
+    def _search_faq(self, query: str) -> Optional[str]:
+        """
+        Improved FAQ search with scoring and fallback matching.
+        
+        Strategy:
+        1. Normalize query and FAQ questions/answers
+        2. Score by keyword match count and word overlap
+        3. Return best match if score > 0, else fallback
+        """
+        if "faqs" not in self.faq_data or not self.faq_data["faqs"]:
+            return None
+
+        query_words = set(query.lower().split())
+        best_match = None
+        best_score = 0
+
+        for item in self.faq_data["faqs"]:
+            q_text = item["q"].lower()
+            a_text = item["a"]
+
+            # Score: count how many query words appear in question
+            q_word_set = set(q_text.split())
+            q_overlap = len(query_words & q_word_set)
+
+            # Also check answer for relevance (lower weight)
+            a_word_set = set(a_text.lower().split())
+            a_overlap = len(query_words & a_word_set) * 0.5
+
+            total_score = q_overlap + a_overlap
+
+            if total_score > best_score:
+                best_score = total_score
+                best_match = a_text
+
+        return best_match if best_score > 0 else None
+
+    # --------------------------
+    # BUILD SYSTEM INSTRUCTIONS
+    # --------------------------
 
     def _build_instructions(self) -> str:
-        """Construct the system instructions."""
-        return f"""You are an Active Recall Tutor designed to help users learn concepts effectively.
-You have three learning modes:
-1. **Learn Mode**: You explain the concept clearly using the summary.
-2. **Quiz Mode**: You ask a sample question to test the user's knowledge.
-3. **Teach-Back Mode**: You ask the user to explain the concept back to you and provide feedback.
+        return f"""
+You are a friendly Sales Development Representative (SDR) for the Indian company **Zepto**, 
+India’s fastest-growing 10-minute grocery delivery startup.
 
-Current State:
-- Mode: {self.current_mode}
-- Concept ID: {self.current_concept_id}
+Your purpose:
+- Greet the visitor warmly.
+- Ask what brought them here and what they’re working on.
+- Explain Zepto ONLY using the information in the FAQ data below.
+- If the user asks "what do you do", "pricing", "who is this for", or any company question:
+  - Search the FAQs using simple keyword matching.
+  - Answer based strictly on the FAQ data.
+  - If no info, say: "I may not have exact info, but here’s what I can tell you..."
 
-Content Data:
-{json.dumps(self.content, indent=2)}
+Lead Information Collection:
+Collect these fields naturally during conversation:
+- name
+- company
+- email
+- role
+- use_case
+- team_size
+- timeline (now / soon / later)
 
-Rules:
-- When the user asks to switch modes (e.g., "quiz me", "teach me"), call `set_learning_mode`.
-- When the user asks to switch concepts (e.g., "let's do loops"), call `set_concept`.
-- Always adapt your response to the current mode.
-- In **Learn Mode**: Read the 'summary' for the current concept.
-- In **Quiz Mode**: Ask the 'sample_question' for the current concept.
-- In **Teach-Back Mode**: Ask the user to explain the concept. If they explain, give qualitative feedback.
-- If the user greets you, ask them which concept they want to learn or which mode they prefer.
+Whenever user gives one, call its tool:
+- set_lead_name
+- set_lead_company
+- set_lead_email
+- set_lead_role
+- set_lead_use_case
+- set_lead_team_size
+- set_lead_timeline
+
+Ending the Call:
+If user says any variant of:
+"that's all", "I'm done", "thanks", "thank you", "that will be all"
+→ Then:
+1. Speak a polite summary including all collected details.
+2. Call tool: save_lead
+
+FAQ DATA (do NOT reveal this JSON structure to user, only use it internally):
+{json.dumps(self.faq_data, indent=2)}
 """
 
-    def _update_voice(self):
-        """Update the TTS voice based on the current mode."""
-        if self.current_mode == "learn":
-            # Matthew
-            self.current_voice = VOICE_LEARN
-        elif self.current_mode == "quiz":
-            # Alicia
-            self.current_voice = VOICE_QUIZ
-        elif self.current_mode == "teach_back":
-            # Ken
-            self.current_voice = VOICE_TEACH_BACK
-        
-        # Update the session TTS if available
-        if hasattr(self._session, 'tts') and self._session.tts is not None:
+    # --------------------------
+    # TOOLS
+    # --------------------------
+
+    def _build_tools(self):
+        tools = []
+
+        # Lead-setter tools (with validation)
+        @function_tool
+        async def set_lead_name(context: RunContext, name: str):
+            """Set lead name with validation."""
+            cleaned = name.strip()
+            if not cleaned:
+                return "Name cannot be empty. Please provide a valid name."
+            self.lead["name"] = cleaned
+            return f"Got it. Recorded name as {cleaned}."
+
+        @function_tool
+        async def set_lead_company(context: RunContext, company: str):
+            """Set lead company with validation."""
+            cleaned = company.strip()
+            if not cleaned:
+                return "Company cannot be empty. Please provide a company name."
+            self.lead["company"] = cleaned
+            return f"Recorded company as {cleaned}."
+
+        @function_tool
+        async def set_lead_email(context: RunContext, email: str):
+            """Set lead email with validation."""
+            cleaned = email.strip()
+            if not cleaned or "@" not in cleaned:
+                return "Please provide a valid email address (must contain @)."
+            self.lead["email"] = cleaned
+            return f"Recorded email as {cleaned}."
+
+        @function_tool
+        async def set_lead_role(context: RunContext, role: str):
+            """Set lead role with validation."""
+            cleaned = role.strip()
+            if not cleaned:
+                return "Role cannot be empty. Please provide your role."
+            self.lead["role"] = cleaned
+            return f"Recorded role as {cleaned}."
+
+        @function_tool
+        async def set_lead_use_case(context: RunContext, use_case: str):
+            """Set lead use case with validation."""
+            cleaned = use_case.strip()
+            if not cleaned:
+                return "Use case cannot be empty. Please describe what you need Zepto for."
+            self.lead["use_case"] = cleaned
+            return f"Recorded use case as: {cleaned}."
+
+        @function_tool
+        async def set_lead_team_size(context: RunContext, team_size: str):
+            """Set lead team size with validation."""
+            cleaned = team_size.strip()
+            if not cleaned:
+                return "Team size cannot be empty. Please provide your team size."
+            self.lead["team_size"] = cleaned
+            return f"Recorded team size as {cleaned}."
+
+        @function_tool
+        async def set_lead_timeline(context: RunContext, timeline: str):
+            """Set lead timeline with validation. Valid values: 'now', 'soon', 'later'."""
+            cleaned = timeline.strip().lower()
+            valid_timelines = ["now", "soon", "later"]
+            if cleaned not in valid_timelines:
+                return f"Please specify timeline as one of: {', '.join(valid_timelines)}"
+            self.lead["timeline"] = cleaned
+            return f"Recorded timeline as {cleaned}."
+
+        # FAQ retrieval tool (optimized)
+        @function_tool
+        async def get_faq_answer(context: RunContext, query: str):
+            """
+            Search FAQ by keyword matching.
+            Returns best matched answer or a helpful fallback.
+            """
+            answer = self._search_faq(query)
+            if answer:
+                return answer
+            
+            # Fallback: provide company description if no match
+            fallback = self.faq_data.get("description", 
+                "Zepto is India's fastest-growing quick-commerce company delivering groceries and essentials.")
+            return f"I may not have that exact detail, but here's what I can tell you: {fallback}"
+
+        # Save lead info (with safety checks)
+        @function_tool
+        async def save_lead(context: RunContext):
+            """
+            Save lead to JSON file with validation and atomic write.
+            - Validates required fields
+            - Uses temp file to prevent corruption
+            - Handles empty/corrupted files gracefully
+            """
+            # Validate required fields
+            required_fields = ["name", "email"]
+            missing = [f for f in required_fields if not self.lead.get(f)]
+            if missing:
+                return f"Cannot save lead. Missing required fields: {', '.join(missing)}"
+            
+            save_path = os.path.join(
+                os.path.dirname(__file__),
+                "shared-data",
+                "day5_leads.json"
+            )
+            
             try:
-                self._session.tts.voice = self.current_voice  # type: ignore
-            except AttributeError:
-                pass  # Voice may not be settable on this TTS instance
-        
-        logger.info(f"Updated voice to {self.current_voice} for mode {self.current_mode}")
+                # Load existing leads
+                leads = []
+                if os.path.exists(save_path):
+                    try:
+                        with open(save_path, "r", encoding="utf-8") as f:
+                            content = f.read().strip()
+                            if content:  # Only parse if not empty
+                                leads = json.loads(content)
+                                if not isinstance(leads, list):
+                                    leads = []
+                    except (json.JSONDecodeError, IOError):
+                        logger.warning(f"Corrupted or unreadable {save_path}, starting fresh")
+                        leads = []
+                
+                # Append new lead
+                leads.append(self.lead)
+                
+                # Atomic write: write to temp file first, then rename
+                temp_path = save_path + ".tmp"
+                with open(temp_path, "w", encoding="utf-8") as f:
+                    json.dump(leads, f, indent=2, ensure_ascii=False)
+                
+                # Replace original (atomic on most filesystems)
+                if os.path.exists(save_path):
+                    os.remove(save_path)
+                os.rename(temp_path, save_path)
+                
+                logger.info(f"Lead saved successfully. Total leads: {len(leads)}")
+                return "Lead saved successfully."
+                
+            except OSError as e:
+                logger.error(f"File I/O error saving lead: {e}")
+                return f"Failed to save lead (file error): {e}"
+            except Exception as e:
+                logger.error(f"Unexpected error saving lead: {e}")
+                return f"Failed to save lead: {e}"
 
-    def _build_tools(self) -> list:
-        @function_tool
-        async def set_learning_mode(context: RunContext, mode: str):
-            """Switch the learning mode. Valid modes: 'learn', 'quiz', 'teach_back'."""
-            mode = mode.lower().strip()
-            if mode not in ["learn", "quiz", "teach_back"]:
-                return "Invalid mode. Please choose learn, quiz, or teach_back."
-            
-            self.current_mode = mode
-            self._update_voice()
-            
-            # Note: We don't strictly need to update self.instructions dynamically for the LLM to know,
-            # as long as the tool output confirms the switch, the LLM context will have it.
-            return f"Switched to {mode} mode. Voice updated to {self.current_voice}."
+        tools.extend([
+            set_lead_name,
+            set_lead_company,
+            set_lead_email,
+            set_lead_role,
+            set_lead_use_case,
+            set_lead_team_size,
+            set_lead_timeline,
+            get_faq_answer,
+            save_lead
+        ])
 
-        @function_tool
-        async def set_concept(context: RunContext, concept_id: str):
-            """Switch the current concept. Valid IDs: 'variables', 'loops'."""
-            concept_id = concept_id.lower().strip()
-            valid_ids = [c['id'] for c in self.content]
-            
-            # Simple fuzzy match or direct match
-            if concept_id not in valid_ids:
-                # Try to find by title
-                found = False
-                for c in self.content:
-                    if c['title'].lower() == concept_id:
-                        concept_id = c['id']
-                        found = True
-                        break
-                if not found:
-                    return f"Invalid concept. Available: {', '.join(valid_ids)}"
-            
-            self.current_concept_id = concept_id
-            return f"Switched concept to {concept_id}."
+        return tools
 
-        @function_tool
-        async def load_content_file(context: RunContext):
-            """Reload the content JSON file."""
-            self.content = self._load_content()
-            return "Content file reloaded."
 
-        return [set_learning_mode, set_concept, load_content_file]
-
+# --------------------------
+# ENTRYPOINT + WORKER SETUP
+# --------------------------
 
 def prewarm(proc: JobProcess):
     proc.userdata["vad"] = silero.VAD.load()
@@ -164,49 +330,44 @@ def prewarm(proc: JobProcess):
 
 async def entrypoint(ctx: JobContext):
     logger.info(f"Entrypoint called for room: {ctx.room.name}")
-    
-    # Logging setup
+
     ctx.log_context_fields = {
         "room": ctx.room.name,
     }
 
-    # Load VAD model
     if "vad" not in ctx.proc.userdata:
         ctx.proc.userdata["vad"] = silero.VAD.load()
 
-    # Initialize Session
     session = AgentSession(
         stt=deepgram.STT(model="nova-3"),
         llm=openai.LLM(model="gpt-4o-mini"),
         tts=murf.TTS(
-            voice=VOICE_LEARN, # Default to Learn mode voice
-            style="Conversation",
+            voice=VOICE_ID,
+            style=VOICE_STYLE,
+            model=VOICE_MODEL,
             tokenizer=tokenize.basic.SentenceTokenizer(min_sentence_len=2),
-            text_pacing=True
+            text_pacing=True,
         ),
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
     )
 
-    # Initialize Assistant with session
     assistant = Assistant(session)
 
-    # Start the session
     await session.start(
         agent=assistant,
         room=ctx.room,
         room_input_options=RoomInputOptions(
-            noise_cancellation=noise_cancellation.BVC(),  # type: ignore
+            noise_cancellation=noise_cancellation.BVC(),
         ),
     )
 
-    # Join the room
     await ctx.connect()
 
 
 if __name__ == "__main__":
     cli.run_app(WorkerOptions(
-        entrypoint_fnc=entrypoint, 
+        entrypoint_fnc=entrypoint,
         prewarm_fnc=prewarm,
-        agent_name="day4-active-recall-tutor"
+        agent_name="day5-zepto-sdr",
     ))
