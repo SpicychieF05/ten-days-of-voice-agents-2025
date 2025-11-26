@@ -37,10 +37,10 @@ class Assistant(Agent):
 
         # Lead capture state (dict with string or None values)
         self.lead: dict = {
-            "name": None,
-            "company": None,
+            "name": "Nikhil",
+            "company": "Zepto",
             "email": None,
-            "role": None,
+            "role": "Coustomer Care",
             "use_case": None,
             "team_size": None,
             "timeline": None,

@@ -37,6 +37,6 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
 
   // for LiveKit Cloud Sandbox
   sandboxId: undefined,
-  agentName: 'day4-active-recall-tutor',
+  agentName: 'day5-zepto-sdr',
 };
   
