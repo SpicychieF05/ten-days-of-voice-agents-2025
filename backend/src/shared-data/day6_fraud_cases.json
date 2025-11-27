@@ -5,9 +5,9 @@
     "helplineAgentRole": "You are the official Fraud Prevention Helpline Voice Assistant for Punjab National Bank. All calls involve suspicious transaction verification."
   },
   "callerIdentity": {
-    "representativeName": "Maya Roy",
+    "representativeName": "Akash Roy",
     "representativeRole": "Fraud Detection Officer, Punjab National Bank",
-    "introSentence": "This is Maya Roy calling from Punjab National Bank, Salt Lake Branch, Kolkata. We detected a suspicious transaction on your account."
+    "introSentence": "This is Akash Roy calling from Punjab National Bank, Salt Lake Branch, Kolkata. We detected a suspicious transaction on your account."
   },
   "fraudCases": [
     {
@@ -23,7 +23,7 @@
       "transactionSource": "Uppercase official website",
       "transactionMethod": "Google Pay",
       "securityQuestion": "What is the name of your first school?",
-      "securityAnswer": "Gopalpur High",
+      "securityAnswer": "Bolpur High School",
       "riskReasons": [
         "Transaction came from a new device fingerprint.",
         "The amount is higher than recent average spending.",
@@ -32,8 +32,8 @@
         "Occurred shortly after a failed authentication attempt."
       ],
       "spokenRiskContext": "Our system flagged this purchase because it came from a new device, from a merchant you rarely use, and from a location that doesn't match your recent login history.",
-      "status": "pending_review",
-      "outcomeNote": ""
+      "status": "confirmed_safe",
+      "outcomeNote": "Customer Chirantan Mallick confirmed the transaction as legitimate."
     }
   ]
 }

@@ -37,6 +37,6 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
 
   // for LiveKit Cloud Sandbox
   sandboxId: undefined,
-  agentName: 'day5-zepto-sdr',
+  agentName: 'pnb-fraud-agent',
 };
   

@@ -15,6 +15,7 @@ Features:
 import logging
 import json
 import os
+import asyncio
 from typing import Optional, Dict, Any
 
 from dotenv import load_dotenv
@@ -55,7 +56,7 @@ class PNBFraudAgent(Agent):
     Punjab National Bank Fraud Detection Voice Agent
     
     Handles fraud verification calls with the following workflow:
-    1. Introduction as Maya Roy from PNB
+    1. Introduction as Akash Roy from PNB
     2. Ask for customer name
     3. Load fraud case from database
     4. Verify identity with security question
@@ -135,7 +136,7 @@ class PNBFraudAgent(Agent):
         
         bank_name = self.fraud_db.get("bankInfo", {}).get("bankName", "Punjab National Bank")
         branch = self.fraud_db.get("bankInfo", {}).get("branch", "Salt Lake Branch, Kolkata")
-        rep_name = self.fraud_db.get("callerIdentity", {}).get("representativeName", "Maya Roy")
+        rep_name = self.fraud_db.get("callerIdentity", {}).get("representativeName", "Akash Roy")
         rep_role = self.fraud_db.get("callerIdentity", {}).get("representativeRole", "Fraud Detection Officer")
 
         return f"""
@@ -149,12 +150,15 @@ IMPORTANT SECURITY RULES:
 - ONLY use the security question from the fraud case database
 - Be calm, professional, and reassuring at all times
 
-START THE CONVERSATION IMMEDIATELY:
-As soon as the call connects, greet the customer by saying:
+IMPORTANT: YOUR FIRST RESPONSE:
+When the user greets you (says "hello", "hi", or anything similar), immediately introduce yourself by saying:
 "Hello, this is {rep_name} calling from {bank_name}, {branch}. We detected a suspicious transaction on your account and wanted to verify it with you. May I have your full name please?"
 
+DO NOT engage in small talk. Go straight to the fraud verification introduction.
+
 CALL FLOW:
-1. INTRODUCTION (Start immediately with greeting above)
+1. USER GREETING - User says "hi" or "hello"
+   YOUR RESPONSE: Immediately give the fraud detection introduction above and ask for their name
 
 2. IDENTITY COLLECTION
    - After customer provides name, call tool: load_fraud_case(userName)
@@ -394,18 +398,18 @@ async def entrypoint(ctx: JobContext):
         with open(fraud_db_path, "r", encoding="utf-8") as f:
             fraud_db = json.load(f)
     except:
-        fraud_db = {"callerIdentity": {"representativeName": "Maya Roy"}, "bankInfo": {"bankName": "Punjab National Bank", "branch": "Salt Lake Branch, Kolkata"}}
+        fraud_db = {"callerIdentity": {"representativeName": "Akash Roy"}, "bankInfo": {"bankName": "Punjab National Bank", "branch": "Salt Lake Branch, Kolkata"}}
     
-    rep_name = fraud_db.get("callerIdentity", {}).get("representativeName", "Maya Roy")
+    rep_name = fraud_db.get("callerIdentity", {}).get("representativeName", "Akash Roy")
     bank_name = fraud_db.get("bankInfo", {}).get("bankName", "Punjab National Bank")
     branch = fraud_db.get("bankInfo", {}).get("branch", "Salt Lake Branch, Kolkata")
     
     greeting = f"Hello, this is {rep_name} calling from {bank_name}, {branch}. We detected a suspicious transaction on your account and wanted to verify it with you. May I have your full name please?"
 
-    # Create AgentSession with Murf Falcon TTS, Deepgram STT, Gemini LLM
+    # Create AgentSession with Murf Falcon TTS, Deepgram STT, Google Gemini LLM
     session = AgentSession(
         stt=deepgram.STT(model="nova-3"),
-        llm=google.LLM(model="gemini-2.0-flash-exp"),
+        llm=google.LLM(model="gemini-2.5-flash"),
         tts=murf.TTS(
             voice=VOICE_ID,
             style=VOICE_STYLE,
@@ -414,7 +418,6 @@ async def entrypoint(ctx: JobContext):
             text_pacing=True,
         ),
         vad=ctx.proc.userdata["vad"],
-        preemptive_generation=True,
     )
 
     # Create assistant instance
@@ -429,12 +432,7 @@ async def entrypoint(ctx: JobContext):
         ),
     )
     
-    logger.info(f"✅ Agent session started")
-
-    # Send initial greeting using the session's say method
-    await session.say(greeting, allow_interruptions=True)
-    
-    logger.info(f"🎙️ Initial greeting sent, agent ready for fraud detection calls")
+    logger.info(f"✅ Agent session started and ready for fraud detection calls")
 
 
 # ===========================================
