@@ -1,7 +1,21 @@
+"""
+Day 6: Punjab National Bank Fraud Alert Voice Agent
+==================================================
+This agent handles incoming fraud alert calls for Punjab National Bank.
+It verifies suspicious transactions with account holders and updates fraud case status.
+
+Features:
+- Browser-based voice interface support
+- LiveKit Telephony support (+1 518 600 7326)
+- Secure identity verification
+- Transaction fraud confirmation workflow
+- JSON-based case persistence
+"""
+
 import logging
 import json
 import os
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -16,36 +30,53 @@ from livekit.agents import (
     RunContext,
     RoomInputOptions,
 )
-from livekit.plugins import murf, silero, openai, deepgram, noise_cancellation
+from livekit.plugins import murf, silero, deepgram, noise_cancellation, google
 
-logger = logging.getLogger("agent")
+logger = logging.getLogger("pnb-fraud-agent")
 
-load_dotenv(".env.local")
+# Load environment variables from backend/.env.local
+env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env.local")
+load_dotenv(env_path)
 
-# Nikhil Voice (Murf Falcon)
+# Murf Falcon TTS Configuration
 VOICE_ID = "Nikhil"
 VOICE_STYLE = "Conversational"
 VOICE_MODEL = "Falcon"
 
+# Telephony Configuration
+TELEPHONY_PHONE_NUMBER = "+1 518 600 7326"
+TELEPHONY_TRUNK_ID = "PN_PPN_xeEuDKznYvKd"
+DISPATCH_RULE = "pnb-fraud-detection-dispatch"
+AGENT_NAME = "pnb-fraud-agent"
 
-class Assistant(Agent):
+
+class PNBFraudAgent(Agent):
+    """
+    Punjab National Bank Fraud Detection Voice Agent
+    
+    Handles fraud verification calls with the following workflow:
+    1. Introduction as Maya Roy from PNB
+    2. Ask for customer name
+    3. Load fraud case from database
+    4. Verify identity with security question
+    5. Present suspicious transaction details
+    6. Ask if customer recognizes the transaction
+    7. Update case status based on response
+    8. Provide summary and end call
+    """
+
     def __init__(self, session: AgentSession) -> None:
         self._session = session
 
-        # Load Zepto FAQ data
-        self.faq_data = self._load_faq()
+        # Load fraud cases database
+        self.fraud_db = self._load_fraud_database()
 
-        # Lead capture state (dict with string or None values)
-        self.lead: dict = {
-            "name": "Nikhil",
-            "company": "Zepto",
-            "email": None,
-            "role": "Coustomer Care",
-            "use_case": None,
-            "team_size": None,
-            "timeline": None,
-        }
+        # Agent state
+        self.current_case: Optional[Dict[str, Any]] = None
+        self.verification_passed: bool = False
+        self.user_name: Optional[str] = None
 
+        # Build system instructions
         instructions = self._build_instructions()
 
         super().__init__(
@@ -53,304 +84,328 @@ class Assistant(Agent):
             tools=self._build_tools(),
         )
 
-        logger.info("Zepto SDR Assistant initialized.")
+        logger.info("Punjab National Bank Fraud Detection Agent initialized.")
 
-    def _get_leads_path(self) -> str:
-        """Ensure the shared-data directory exists and return leads file path."""
-        base_dir = os.path.join(os.path.dirname(__file__), "shared-data")
-        if not os.path.isdir(base_dir):
-            os.makedirs(base_dir, exist_ok=True)
-            logger.info(f"Created leads directory at: {base_dir}")
-        return os.path.join(base_dir, "day5_leads.json")
+    # ===========================================
+    # DATABASE OPERATIONS
+    # ===========================================
 
-    # --------------------------
-    # FILE LOADING
-    # --------------------------
-
-    def _load_faq(self):
-        faq_path = os.path.join(
+    def _get_fraud_cases_path(self) -> str:
+        """Get path to fraud cases database file."""
+        return os.path.join(
             os.path.dirname(__file__),
             "shared-data",
-            "day5_faq.json"
+            "day6_fraud_cases.json"
         )
-        if os.path.exists(faq_path):
-            with open(faq_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        return {}
 
-    # --------------------------
-    # FAQ SEARCH (OPTIMIZED)
-    # --------------------------
+    def _load_fraud_database(self) -> Dict[str, Any]:
+        """Load fraud cases database from JSON file."""
+        fraud_path = self._get_fraud_cases_path()
+        try:
+            if os.path.exists(fraud_path):
+                with open(fraud_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            else:
+                logger.warning(f"Fraud cases file not found: {fraud_path}")
+                return {"bankInfo": {}, "callerIdentity": {}, "fraudCases": []}
+        except Exception as e:
+            logger.error(f"Error loading fraud database: {e}")
+            return {"bankInfo": {}, "callerIdentity": {}, "fraudCases": []}
 
-    def _search_faq(self, query: str) -> Optional[str]:
-        """
-        Improved FAQ search with scoring and fallback matching.
-        
-        Strategy:
-        1. Normalize query and FAQ questions/answers
-        2. Score by keyword match count and word overlap
-        3. Return best match if score > 0, else fallback
-        """
-        if "faqs" not in self.faq_data or not self.faq_data["faqs"]:
-            return None
+    def _save_fraud_database(self) -> bool:
+        """Persist fraud database to JSON file safely."""
+        fraud_path = self._get_fraud_cases_path()
+        try:
+            temp_path = fraud_path + ".tmp"
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(self.fraud_db, f, indent=2, ensure_ascii=False)
+            os.replace(temp_path, fraud_path)
+            logger.info(f"Fraud database saved successfully to: {fraud_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving fraud database: {e}")
+            return False
 
-        query_words = set(query.lower().split())
-        best_match = None
-        best_score = 0
-
-        for item in self.faq_data["faqs"]:
-            q_text = item["q"].lower()
-            a_text = item["a"]
-
-            # Score: count how many query words appear in question
-            q_word_set = set(q_text.split())
-            q_overlap = len(query_words & q_word_set)
-
-            # Also check answer for relevance (lower weight)
-            a_word_set = set(a_text.lower().split())
-            a_overlap = len(query_words & a_word_set) * 0.5
-
-            total_score = q_overlap + a_overlap
-
-            if total_score > best_score:
-                best_score = total_score
-                best_match = a_text
-
-        return best_match if best_score > 0 else None
-
-    # --------------------------
-    # BUILD SYSTEM INSTRUCTIONS
-    # --------------------------
+    # ===========================================
+    # SYSTEM INSTRUCTIONS
+    # ===========================================
 
     def _build_instructions(self) -> str:
+        """Build the agent's system prompt with persona and workflow."""
+        
+        bank_name = self.fraud_db.get("bankInfo", {}).get("bankName", "Punjab National Bank")
+        branch = self.fraud_db.get("bankInfo", {}).get("branch", "Salt Lake Branch, Kolkata")
+        rep_name = self.fraud_db.get("callerIdentity", {}).get("representativeName", "Maya Roy")
+        rep_role = self.fraud_db.get("callerIdentity", {}).get("representativeRole", "Fraud Detection Officer")
+
         return f"""
-You are a friendly Sales Development Representative (SDR) for the Indian company **Zepto**, 
-India’s fastest-growing 10-minute grocery delivery startup.
+You are {rep_name}, a {rep_role} at {bank_name}, {branch}.
 
-Your purpose:
-- Greet the visitor warmly.
-- Ask what brought them here and what they’re working on.
-- Explain Zepto ONLY using the information in the FAQ data below.
-- If the user asks "what do you do", "pricing", "who is this for", or any company question:
-  - Search the FAQs using simple keyword matching.
-  - Answer based strictly on the FAQ data.
-  - If no info, say: "I may not have exact info, but here’s what I can tell you..."
+Your role is to help customers verify suspicious transactions on their accounts.
 
-Lead Information Collection:
-Collect these fields naturally during conversation:
-- name
-- company
-- email
-- role
-- use_case
-- team_size
-- timeline (now / soon / later)
+IMPORTANT SECURITY RULES:
+- NEVER ask for PIN, CVV, full card number, OTP, or passwords
+- NEVER request sensitive banking credentials
+- ONLY use the security question from the fraud case database
+- Be calm, professional, and reassuring at all times
 
-Whenever user gives one, call its tool:
-- set_lead_name
-- set_lead_company
-- set_lead_email
-- set_lead_role
-- set_lead_use_case
-- set_lead_team_size
-- set_lead_timeline
+START THE CONVERSATION IMMEDIATELY:
+As soon as the call connects, greet the customer by saying:
+"Hello, this is {rep_name} calling from {bank_name}, {branch}. We detected a suspicious transaction on your account and wanted to verify it with you. May I have your full name please?"
 
-Ending the Call:
-If user says any variant of:
-"that's all", "I'm done", "thanks", "thank you", "that will be all"
-→ Then:
-1. Speak a polite summary including all collected details.
-2. Call tool: save_lead
+CALL FLOW:
+1. INTRODUCTION (Start immediately with greeting above)
 
-FAQ DATA (do NOT reveal this JSON structure to user, only use it internally):
-{json.dumps(self.faq_data, indent=2)}
+2. IDENTITY COLLECTION
+   - After customer provides name, call tool: load_fraud_case(userName)
+   - If case not found, politely say you'll need to verify details and end call
+
+3. SECURITY VERIFICATION
+   - Say: "For security purposes, I need to verify your identity with a quick question."
+   - Ask the security question from the fraud case
+   - When user answers, call tool: verify_answer(answer)
+   - If verification fails, apologize and end call politely
+
+4. TRANSACTION PRESENTATION
+   - After successful verification, present the suspicious transaction details:
+     * Transaction amount
+     * Merchant name
+     * Transaction time
+     * Transaction method
+     * Risk context (explain why it was flagged)
+   
+5. CONFIRMATION
+   - Ask: "Did you authorize this transaction?"
+   - If user says YES/recognizes it → call tool: mark_safe()
+   - If user says NO/doesn't recognize it → call tool: mark_fraud()
+
+6. SUMMARY & CLOSURE
+   - Provide a brief summary of the action taken
+   - Thank the customer for their time
+   - If fraud confirmed: "We have blocked this transaction and will investigate further. You will not be charged."
+   - If safe confirmed: "Thank you for confirming. The transaction will proceed normally."
+   - Say goodbye professionally
+
+TONE:
+- Calm and reassuring (customers may be worried)
+- Professional and courteous
+- Clear and concise
+- Empathetic to customer concerns
+
+ENDING THE CALL:
+If the user says any variant of "that's all", "thank you", "goodbye", "I'm done":
+- Call tool: save_case() to persist any updates
+- Provide final summary
+- End with: "Thank you for your time. Have a great day."
 """
 
-    # --------------------------
+    # ===========================================
     # TOOLS
-    # --------------------------
+    # ===========================================
 
     def _build_tools(self):
+        """Build all fraud detection tools."""
         tools = []
 
-        # Lead-setter tools (with validation)
         @function_tool
-        async def set_lead_name(context: RunContext, name: str):
-            """Set lead name with validation."""
-            cleaned = name.strip()
-            if not cleaned:
-                return "Name cannot be empty. Please provide a valid name."
-            self.lead["name"] = cleaned
-            return f"Got it. Recorded name as {cleaned}."
-
-        @function_tool
-        async def set_lead_company(context: RunContext, company: str):
-            """Set lead company with validation."""
-            cleaned = company.strip()
-            if not cleaned:
-                return "Company cannot be empty. Please provide a company name."
-            self.lead["company"] = cleaned
-            return f"Recorded company as {cleaned}."
-
-        @function_tool
-        async def set_lead_email(context: RunContext, email: str):
-            """Set lead email with validation."""
-            cleaned = email.strip()
-            if not cleaned or "@" not in cleaned:
-                return "Please provide a valid email address (must contain @)."
-            self.lead["email"] = cleaned
-            return f"Recorded email as {cleaned}."
-
-        @function_tool
-        async def set_lead_role(context: RunContext, role: str):
-            """Set lead role with validation."""
-            cleaned = role.strip()
-            if not cleaned:
-                return "Role cannot be empty. Please provide your role."
-            self.lead["role"] = cleaned
-            return f"Recorded role as {cleaned}."
-
-        @function_tool
-        async def set_lead_use_case(context: RunContext, use_case: str):
-            """Set lead use case with validation."""
-            cleaned = use_case.strip()
-            if not cleaned:
-                return "Use case cannot be empty. Please describe what you need Zepto for."
-            self.lead["use_case"] = cleaned
-            return f"Recorded use case as: {cleaned}."
-
-        @function_tool
-        async def set_lead_team_size(context: RunContext, team_size: str):
-            """Set lead team size with validation."""
-            cleaned = team_size.strip()
-            if not cleaned:
-                return "Team size cannot be empty. Please provide your team size."
-            self.lead["team_size"] = cleaned
-            return f"Recorded team size as {cleaned}."
-
-        @function_tool
-        async def set_lead_timeline(context: RunContext, timeline: str):
-            """Set lead timeline with validation. Valid values: 'now', 'soon', 'later'."""
-            cleaned = timeline.strip().lower()
-            valid_timelines = ["now", "soon", "later"]
-            if cleaned not in valid_timelines:
-                return f"Please specify timeline as one of: {', '.join(valid_timelines)}"
-            self.lead["timeline"] = cleaned
-            return f"Recorded timeline as {cleaned}."
-
-        # FAQ retrieval tool (optimized)
-        @function_tool
-        async def get_faq_answer(context: RunContext, query: str):
+        async def load_fraud_case(context: RunContext, userName: str) -> str:
             """
-            Search FAQ by keyword matching.
-            Returns best matched answer or a helpful fallback.
+            Load fraud case for the specified customer name.
+            Returns case details or error message.
             """
-            answer = self._search_faq(query)
-            if answer:
-                return answer
+            cleaned_name = userName.strip()
+            if not cleaned_name:
+                return "Customer name cannot be empty. Please provide a valid name."
+
+            self.user_name = cleaned_name
+
+            # Search for case in database
+            fraud_cases = self.fraud_db.get("fraudCases", [])
+            for case in fraud_cases:
+                if case.get("userName", "").lower() == cleaned_name.lower():
+                    self.current_case = case
+                    logger.info(f"Loaded fraud case for: {cleaned_name}")
+                    
+                    # Return structured case info for agent
+                    return f"""
+Fraud case loaded successfully for {cleaned_name}.
+
+Account: {case.get('maskedAccount', 'N/A')}
+Card: {case.get('maskedCard', 'N/A')}
+
+Suspicious Transaction:
+- Amount: {case.get('transactionAmount', 'N/A')}
+- Merchant: {case.get('merchant', 'N/A')}
+- Time: {case.get('transactionTime', 'N/A')}
+- Method: {case.get('transactionMethod', 'N/A')}
+- Location: {case.get('location', 'N/A')}
+
+Risk Context: {case.get('spokenRiskContext', 'Transaction flagged by security systems.')}
+
+Security Question: {case.get('securityQuestion', 'N/A')}
+
+Now proceed to verify the customer's identity with the security question.
+"""
+
+            # Case not found
+            logger.warning(f"No fraud case found for: {cleaned_name}")
+            return f"I apologize, but I cannot find a pending fraud alert for the name '{cleaned_name}'. Please verify the name or contact our main helpline for assistance."
+
+        @function_tool
+        async def verify_answer(context: RunContext, answer: str) -> str:
+            """
+            Verify customer's answer to security question.
+            Returns verification result.
+            """
+            if not self.current_case:
+                return "Error: No fraud case loaded. Please provide your name first."
+
+            cleaned_answer = answer.strip()
+            correct_answer = self.current_case.get("securityAnswer", "").strip()
+
+            # Case-insensitive comparison
+            if cleaned_answer.lower() == correct_answer.lower():
+                self.verification_passed = True
+                logger.info(f"Identity verification passed for: {self.user_name}")
+                return "Identity verification successful. Now proceed to present the suspicious transaction details and ask if the customer recognizes it."
+            else:
+                self.verification_passed = False
+                logger.warning(f"Identity verification failed for: {self.user_name}")
+                return "I'm sorry, but that answer doesn't match our records. For your security, I cannot proceed with this call. Please contact our branch directly with a valid ID. Thank you."
+
+        @function_tool
+        async def mark_safe(context: RunContext) -> str:
+            """
+            Mark the transaction as safe (customer authorized it).
+            Updates case status to 'confirmed_safe'.
+            """
+            if not self.current_case:
+                return "Error: No fraud case loaded."
+
+            if not self.verification_passed:
+                return "Error: Identity verification not completed."
+
+            self.current_case["status"] = "confirmed_safe"
+            self.current_case["outcomeNote"] = f"Customer {self.user_name} confirmed the transaction as legitimate."
             
-            # Fallback: provide company description if no match
-            fallback = self.faq_data.get("description", 
-                "Zepto is India's fastest-growing quick-commerce company delivering groceries and essentials.")
-            return f"I may not have that exact detail, but here's what I can tell you: {fallback}"
+            logger.info(f"Transaction marked as SAFE for: {self.user_name}")
+            
+            return f"Transaction confirmed as safe. The charge of {self.current_case.get('transactionAmount', 'N/A')} to {self.current_case.get('merchant', 'N/A')} will proceed normally. Thank the customer and prepare to end the call."
 
-        # Save lead info (with safety checks)
         @function_tool
-        async def save_lead(context: RunContext):
-            """Validate, sanitize, and persist lead data safely."""
-            save_path = self._get_leads_path()
+        async def mark_fraud(context: RunContext) -> str:
+            """
+            Mark the transaction as fraudulent (customer did not authorize it).
+            Updates case status to 'confirmed_fraud'.
+            """
+            if not self.current_case:
+                return "Error: No fraud case loaded."
 
-            # Normalize lead values and collect notes
-            lead_copy = {}
-            notes: list[str] = []
-            for field, value in self.lead.items():
-                cleaned = value.strip() if isinstance(value, str) else value
-                cleaned = cleaned if cleaned else None
-                lead_copy[field] = cleaned
+            if not self.verification_passed:
+                return "Error: Identity verification not completed."
 
-            if not any(lead_copy.values()):
-                return "Cannot save lead. No information collected yet."
+            self.current_case["status"] = "confirmed_fraud"
+            self.current_case["outcomeNote"] = f"Customer {self.user_name} confirmed this is fraudulent. Transaction blocked."
+            
+            logger.info(f"Transaction marked as FRAUD for: {self.user_name}")
+            
+            return f"Transaction confirmed as fraudulent. We have blocked the charge of {self.current_case.get('transactionAmount', 'N/A')} to {self.current_case.get('merchant', 'N/A')}. The customer will not be charged. Our fraud investigation team will follow up. Thank the customer and prepare to end the call."
 
-            email_val = lead_copy.get("email")
-            if email_val and "@" not in email_val:
-                notes.append("invalid_email")
-                logger.warning("Lead email missing '@': %s", email_val)
+        @function_tool
+        async def mark_verification_failed(context: RunContext) -> str:
+            """
+            Mark case when verification fails.
+            Updates case status to 'verification_failed'.
+            """
+            if not self.current_case:
+                return "Error: No fraud case loaded."
 
-            if notes:
-                lead_copy.setdefault("_notes", notes)
+            self.current_case["status"] = "verification_failed"
+            self.current_case["outcomeNote"] = f"Identity verification failed for {self.user_name}. Call terminated."
+            
+            logger.info(f"Verification FAILED for: {self.user_name}")
+            
+            return "Verification failed. Case marked. End the call politely and securely."
 
-            logger.info(f"Saving lead to: {save_path}")
-            print(f"Saving lead to: {save_path}")
+        @function_tool
+        async def save_case(context: RunContext) -> str:
+            """
+            Save current case updates to database.
+            Persists all changes to JSON file.
+            """
+            if not self.current_case:
+                return "No case to save."
 
-            try:
-                leads = []
-                if os.path.exists(save_path):
-                    try:
-                        with open(save_path, "r", encoding="utf-8") as f:
-                            content = f.read().strip()
-                            if content:
-                                parsed = json.loads(content)
-                                leads = parsed if isinstance(parsed, list) else []
-                    except (json.JSONDecodeError, OSError):
-                        logger.warning(f"Invalid JSON at {save_path}, resetting to empty list")
-                        leads = []
+            # Update the case in the database
+            fraud_cases = self.fraud_db.get("fraudCases", [])
+            for i, case in enumerate(fraud_cases):
+                if case.get("userName") == self.current_case.get("userName"):
+                    fraud_cases[i] = self.current_case
+                    break
 
-                leads.append(lead_copy)
-
-                temp_path = save_path + ".tmp"
-                with open(temp_path, "w", encoding="utf-8") as f:
-                    json.dump(leads, f, indent=2, ensure_ascii=False)
-
-                os.replace(temp_path, save_path)
-                logger.info(f"Lead saved successfully. Total leads: {len(leads)}")
-
-                if notes:
-                    return "Lead saved with warnings: invalid email format."
-                return "Lead saved successfully."
-
-            except OSError as e:
-                logger.error(f"File I/O error saving lead: {e}")
-                return f"Failed to save lead (file error): {e}"
-            except Exception as e:
-                logger.error(f"Unexpected error saving lead: {e}")
-                return f"Failed to save lead: {e}"
+            # Save to file
+            if self._save_fraud_database():
+                logger.info(f"Case saved successfully for: {self.user_name}")
+                return "Case information saved successfully to database."
+            else:
+                logger.error("Failed to save case to database")
+                return "Warning: Failed to save case to database. Please check system logs."
 
         tools.extend([
-            set_lead_name,
-            set_lead_company,
-            set_lead_email,
-            set_lead_role,
-            set_lead_use_case,
-            set_lead_team_size,
-            set_lead_timeline,
-            get_faq_answer,
-            save_lead
+            load_fraud_case,
+            verify_answer,
+            mark_safe,
+            mark_fraud,
+            mark_verification_failed,
+            save_case
         ])
 
         return tools
 
 
-# --------------------------
-# ENTRYPOINT + WORKER SETUP
-# --------------------------
+# ===========================================
+# LIVEKIT AGENT ENTRYPOINT
+# ===========================================
 
 def prewarm(proc: JobProcess):
+    """Prewarm function to preload VAD model."""
     proc.userdata["vad"] = silero.VAD.load()
+    logger.info("VAD model preloaded")
 
 
 async def entrypoint(ctx: JobContext):
-    logger.info(f"Entrypoint called for room: {ctx.room.name}")
+    """
+    Main entrypoint for LiveKit agent.
+    Handles both browser-based and telephony-based connections.
+    """
+    logger.info(f"🔔 PNB Fraud Agent joining room: {ctx.room.name}")
 
-    ctx.log_context_fields = {
-        "room": ctx.room.name,
-    }
-
+    # Load VAD if not prewarmed
     if "vad" not in ctx.proc.userdata:
         ctx.proc.userdata["vad"] = silero.VAD.load()
 
+    # Connect to room
+    await ctx.connect()
+    logger.info(f"✅ Connected to room: {ctx.room.name}")
+
+    # Create assistant instance first to get greeting
+    fraud_db_path = os.path.join(os.path.dirname(__file__), "shared-data", "day6_fraud_cases.json")
+    try:
+        with open(fraud_db_path, "r", encoding="utf-8") as f:
+            fraud_db = json.load(f)
+    except:
+        fraud_db = {"callerIdentity": {"representativeName": "Maya Roy"}, "bankInfo": {"bankName": "Punjab National Bank", "branch": "Salt Lake Branch, Kolkata"}}
+    
+    rep_name = fraud_db.get("callerIdentity", {}).get("representativeName", "Maya Roy")
+    bank_name = fraud_db.get("bankInfo", {}).get("bankName", "Punjab National Bank")
+    branch = fraud_db.get("bankInfo", {}).get("branch", "Salt Lake Branch, Kolkata")
+    
+    greeting = f"Hello, this is {rep_name} calling from {bank_name}, {branch}. We detected a suspicious transaction on your account and wanted to verify it with you. May I have your full name please?"
+
+    # Create AgentSession with Murf Falcon TTS, Deepgram STT, Gemini LLM
     session = AgentSession(
         stt=deepgram.STT(model="nova-3"),
-        llm=openai.LLM(model="gpt-4o-mini"),
+        llm=google.LLM(model="gemini-2.0-flash-exp"),
         tts=murf.TTS(
             voice=VOICE_ID,
             style=VOICE_STYLE,
@@ -362,8 +417,10 @@ async def entrypoint(ctx: JobContext):
         preemptive_generation=True,
     )
 
-    assistant = Assistant(session)
+    # Create assistant instance
+    assistant = PNBFraudAgent(session)
 
+    # Start agent session
     await session.start(
         agent=assistant,
         room=ctx.room,
@@ -371,13 +428,22 @@ async def entrypoint(ctx: JobContext):
             noise_cancellation=noise_cancellation.BVC(),
         ),
     )
+    
+    logger.info(f"✅ Agent session started")
 
-    await ctx.connect()
+    # Send initial greeting using the session's say method
+    await session.say(greeting, allow_interruptions=True)
+    
+    logger.info(f"🎙️ Initial greeting sent, agent ready for fraud detection calls")
 
+
+# ===========================================
+# MAIN WORKER
+# ===========================================
 
 if __name__ == "__main__":
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint,
         prewarm_fnc=prewarm,
-        agent_name="day5-zepto-sdr",
+        agent_name=AGENT_NAME,
     ))

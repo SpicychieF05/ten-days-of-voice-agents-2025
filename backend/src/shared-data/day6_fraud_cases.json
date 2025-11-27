@@ -1,0 +1,39 @@
+{
+  "bankInfo": {
+    "bankName": "Punjab National Bank",
+    "branch": "Salt Lake Branch, Kolkata",
+    "helplineAgentRole": "You are the official Fraud Prevention Helpline Voice Assistant for Punjab National Bank. All calls involve suspicious transaction verification."
+  },
+  "callerIdentity": {
+    "representativeName": "Maya Roy",
+    "representativeRole": "Fraud Detection Officer, Punjab National Bank",
+    "introSentence": "This is Maya Roy calling from Punjab National Bank, Salt Lake Branch, Kolkata. We detected a suspicious transaction on your account."
+  },
+  "fraudCases": [
+    {
+      "userName": "Chirantan Mallick",
+      "securityIdentifier": "account_0825",
+      "maskedCard": "XXXX-XXXX-XXXX-4605",
+      "maskedAccount": "XXXX-XXXX-0825",
+      "transactionAmount": "₹5800",
+      "merchant": "Uppercase",
+      "transactionTime": "21 November 2025 at approximately 3:45 PM",
+      "location": "Online (Mumbai IP address)",
+      "transactionCategory": "E-commerce",
+      "transactionSource": "Uppercase official website",
+      "transactionMethod": "Google Pay",
+      "securityQuestion": "What is the name of your first school?",
+      "securityAnswer": "Gopalpur High",
+      "riskReasons": [
+        "Transaction came from a new device fingerprint.",
+        "The amount is higher than recent average spending.",
+        "Merchant category differs from user's normal patterns.",
+        "Geo-location mismatch from recent account activity.",
+        "Occurred shortly after a failed authentication attempt."
+      ],
+      "spokenRiskContext": "Our system flagged this purchase because it came from a new device, from a merchant you rarely use, and from a location that doesn't match your recent login history.",
+      "status": "pending_review",
+      "outcomeNote": ""
+    }
+  ]
+}
