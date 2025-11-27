@@ -55,6 +55,8 @@ class PNBFraudAgent(Agent):
     """
     Punjab National Bank Fraud Detection Voice Agent
     
+    You can call our AI customer care agent via this number: +1 518 600 7326
+    
     Handles fraud verification calls with the following workflow:
     1. Introduction as Akash Roy from PNB
     2. Ask for customer name
